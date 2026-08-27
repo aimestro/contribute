@@ -8,7 +8,6 @@ import React, {
   useReducer,
 } from 'react';
 
-import { buildEqualSplits } from './balances';
 import { uid } from './format';
 import { SEED, YOU_ID } from './seed';
 import type {
@@ -31,7 +30,8 @@ type Action =
   | { type: 'ADD_EXPENSE'; expense: Expense }
   | { type: 'UPDATE_EXPENSE'; expense: Expense }
   | { type: 'DELETE_EXPENSE'; id: string }
-  | { type: 'ADD_SETTLEMENT'; settlement: Settlement };
+  | { type: 'ADD_SETTLEMENT'; settlement: Settlement }
+  | { type: 'REPLACE_STATE'; payload: AppState };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -56,6 +56,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, expenses: state.expenses.filter((e) => e.id !== action.id) };
     case 'ADD_SETTLEMENT':
       return { ...state, settlements: [action.settlement, ...state.settlements] };
+    case 'REPLACE_STATE':
+      return { ...action.payload, hydrated: true };
     default:
       return state;
   }
@@ -86,6 +88,7 @@ type StoreApi = {
   }) => Settlement;
   deleteExpense: (id: string) => void;
   resetDemo: () => void;
+  replaceState: (newState: AppState) => void;
 };
 
 const StoreContext = createContext<StoreApi | null>(null);
@@ -169,7 +172,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       note?: string;
     }) => {
       const splits =
-        input.splits ?? buildEqualSplits(input.amount, input.participantIds);
+        input.splits ?? buildSplits(input.splitMethod ?? 'equal', input.amount,
+        input.participantIds.map((id) => ({ personId: id })));
       const expense: Expense = {
         id: uid('e'),
         description: input.description.trim(),
@@ -220,6 +224,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'RESET_DEMO' });
   }, []);
 
+  const replaceState = useCallback((newState: AppState) => {
+    dispatch({ type: 'REPLACE_STATE', payload: newState });
+  }, []);
+
   const value = useMemo(
     () => ({
       state,
@@ -230,8 +238,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       settleUp,
       deleteExpense,
       resetDemo,
+      replaceState,
     }),
-    [state, you, addFriend, addGroup, addExpense, settleUp, deleteExpense, resetDemo],
+    [state, you, addFriend, addGroup, addExpense, settleUp, deleteExpense, resetDemo, replaceState],
   );
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

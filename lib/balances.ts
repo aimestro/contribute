@@ -1,5 +1,5 @@
 import { roundMoney } from './format';
-import type { Expense, Person, Settlement } from './types';
+import type { Expense, Person, Settlement, SplitMethod } from './types';
 
 /** Positive = they owe you; negative = you owe them */
 export type BalanceMap = Record<string, number>;
@@ -125,6 +125,7 @@ export function groupMemberBalances(
   return net;
 }
 
+/** Build equal splits — penny remainder to first participant */
 export function buildEqualSplits(total: number, personIds: string[]) {
   if (personIds.length === 0) return [];
   const base = Math.floor((total * 100) / personIds.length) / 100;
@@ -135,6 +136,70 @@ export function buildEqualSplits(total: number, personIds: string[]) {
     splits[0].amount = roundMoney(splits[0].amount + remainder);
   }
   return splits;
+}
+
+/** Build exact-amount splits — validates sum equals total */
+export function buildExactSplits(total: number, splits: { personId: string; amount: number }[]) {
+  const sum = roundMoney(splits.reduce((a, s) => a + s.amount, 0));
+  if (Math.abs(sum - total) > 0.005) {
+    throw new Error(`Exact splits sum (${sum}) doesn't match total (${total})`);
+  }
+  return splits.map((s) => ({ personId: s.personId, amount: roundMoney(s.amount) }));
+}
+
+/** Build shares-based splits (e.g., 2 shares, 1 share, 1 share) */
+export function buildSharesSplits(total: number, splits: { personId: string; shares: number }[]) {
+  const totalShares = splits.reduce((a, s) => a + s.shares, 0);
+  if (totalShares === 0) throw new Error('Total shares cannot be zero');
+  const perShare = total / totalShares;
+  const baseSplits = splits.map((s) => ({
+    personId: s.personId,
+    amount: roundMoney(perShare * s.shares),
+  }));
+  const allocated = roundMoney(baseSplits.reduce((a, s) => a + s.amount, 0));
+  const remainder = roundMoney(total - allocated);
+  if (baseSplits.length && remainder !== 0) {
+    baseSplits[0].amount = roundMoney(baseSplits[0].amount + remainder);
+  }
+  return baseSplits;
+}
+
+/** Build percentage splits (must sum to 100%) */
+export function buildPercentSplits(total: number, splits: { personId: string; percent: number }[]) {
+  const sum = splits.reduce((a, s) => a + s.percent, 0);
+  if (Math.abs(sum - 100) > 0.005) {
+    throw new Error(`Percent splits sum to ${sum}%, expected 100%`);
+  }
+  const baseSplits = splits.map((s) => ({
+    personId: s.personId,
+    amount: roundMoney((total * s.percent) / 100),
+  }));
+  const allocated = roundMoney(baseSplits.reduce((a, s) => a + s.amount, 0));
+  const remainder = roundMoney(total - allocated);
+  if (baseSplits.length && remainder !== 0) {
+    baseSplits[0].amount = roundMoney(baseSplits[0].amount + remainder);
+  }
+  return baseSplits;
+}
+
+/** Dispatch to the appropriate split builder based on method */
+export function buildSplits(
+  method: SplitMethod,
+  total: number,
+  input: { personId: string; amount?: number; shares?: number; percent?: number }[],
+) {
+  switch (method) {
+    case 'equal':
+      return buildEqualSplits(total, input.map((i) => i.personId));
+    case 'exact':
+      return buildExactSplits(total, input as { personId: string; amount: number }[]);
+    case 'shares':
+      return buildSharesSplits(total, input as { personId: string; shares: number }[]);
+    case 'percent':
+      return buildPercentSplits(total, input as { personId: string; percent: number }[]);
+    default:
+      return buildEqualSplits(total, input.map((i) => i.personId));
+  }
 }
 
 export function peopleById(people: Person[]) {
