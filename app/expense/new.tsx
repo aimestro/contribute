@@ -1,24 +1,24 @@
-"import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 
 import { Button } from '@/components/ui/Button';
 import { Field } from '@/components/ui/Field';
 import { Screen } from '@/components/ui/Screen';
 import { colors, fonts, radii, spacing } from '@/constants/theme';
+import { buildSplits } from '@/lib/balances';
 import { CATEGORIES } from '@/lib/categories';
-import { buildSplits, buildEqualSplits } from '@/lib/balances';
 import { roundMoney } from '@/lib/format';
-import type { CategoryId, SplitMethod } from '@/lib/types';
 import { useStore } from '@/lib/store';
+import type { CategoryId, SplitMethod } from '@/lib/types';
 
 export default function NewExpenseScreen() {
   const router = useRouter();
@@ -45,6 +45,25 @@ export default function NewExpenseScreen() {
 
   const amount = roundMoney(parseFloat(amountText) || 0);
   const participantList = Array.from(participantIds);
+
+  const isValidSplit = () => {
+    if (participantList.length === 0) return false;
+    if (splitMethod === 'equal') return true;
+    if (splitMethod === 'exact') {
+      const sum = participantList.reduce((a, id) => a + (splitInputs[id]?.amount ?? 0), 0);
+      return Math.abs(sum - amount) < 0.005;
+    }
+    if (splitMethod === 'shares') {
+      const totalShares = participantList.reduce((a, id) => a + (splitInputs[id]?.shares ?? 0), 0);
+      return totalShares > 0;
+    }
+    if (splitMethod === 'percent') {
+      const sum = participantList.reduce((a, id) => a + (splitInputs[id]?.percent ?? 0), 0);
+      return Math.abs(sum - 100) < 0.005;
+    }
+    return false;
+  };
+
   const canSave =
     description.trim().length > 0 && amount > 0 && participantIds.size > 0 && isValidSplit();
 
@@ -64,24 +83,6 @@ export default function NewExpenseScreen() {
       ...prev,
       [personId]: { ...prev[personId], [field]: value },
     }));
-  };
-
-  const isValidSplit = () => {
-    if (participantList.length === 0) return false;
-    if (splitMethod === 'equal') return true;
-    if (splitMethod === 'exact') {
-      const sum = participantList.reduce((a, id) => a + (splitInputs[id]?.amount ?? 0), 0);
-      return Math.abs(sum - amount) < 0.005;
-    }
-    if (splitMethod === 'shares') {
-      const totalShares = participantList.reduce((a, id) => a + (splitInputs[id]?.shares ?? 0), 0);
-      return totalShares > 0;
-    }
-    if (splitMethod === 'percent') {
-      const sum = participantList.reduce((a, id) => a + (splitInputs[id]?.percent ?? 0), 0);
-      return Math.abs(sum - 100) < 0.005;
-    }
-    return false;
   };
 
   const getSplitError = () => {
@@ -300,6 +301,7 @@ export default function NewExpenseScreen() {
                   <View key={id} style={styles.splitRow}>
                     <Text style={styles.splitName}>{person?.isYou ? 'You' : person?.name}</Text>
                     <Field
+                      label=""
                       style={styles.splitField}
                       keyboardType={splitMethod === 'exact' ? 'decimal-pad' : 'numeric'}
                       placeholder={splitMethod === 'exact' ? '0.00' : splitMethod === 'shares' ? 'shares' : '%'}
@@ -407,6 +409,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     fontFamily: fonts.sans,
     fontSize: 12,
-    color: colors.destructive,
+    color: colors.danger,
   },
-});"
+});

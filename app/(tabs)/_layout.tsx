@@ -8,7 +8,7 @@ import { colors, fonts } from '@/constants/theme';
 
 function TabIcon(props: {
   name: ComponentProps<typeof FontAwesome>['name'];
-  color: string;
+  color: any;
 }) {
   return <FontAwesome size={22} style={{ marginBottom: -2 }} {...props} />;
 }
