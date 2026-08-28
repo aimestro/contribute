@@ -41,6 +41,7 @@
     "typescript": "~6.0.3"
   },
   "devDependencies": {
+    "@types/base-64": "^1.0.2",
     "@types/react": "~19.2.2",
     "typescript": "~5.9.2"
   }

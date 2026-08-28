@@ -8,6 +8,7 @@ import React, {
   useReducer,
 } from 'react';
 
+import { buildSplits } from './balances';
 import { uid } from './format';
 import { SEED, YOU_ID } from './seed';
 import type {

@@ -1,14 +1,13 @@
+import { encode as btoa } from 'base-64';
 import * as Crypto from 'expo-crypto';
-import { decode as atob, encode as btoa } from 'base-64';
 import * as DocumentPicker from 'expo-document-picker';
+import { FileSystem, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
 import { Alert } from 'react-native';
-import type { AppState, Expense, Group, Person, Settlement } from './types';
 import { uid } from './format';
+import type { AppState, Expense, Group, Person, Settlement } from './types';
 
 const CURRENT_VERSION = 1;
-const ENCRYPTION_ALGO = 'AES-GCM';
 
 /** Generate a random encryption key (base64) */
 export async function generateKey(): Promise<string> {
@@ -16,57 +15,56 @@ export async function generateKey(): Promise<string> {
   return btoa(String.fromCharCode(...key));
 }
 
-/** Derive key from passphrase using PBKDF2 */
-export async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {
-  const encoder = new TextEncoder();
-  const keyMaterial = await Crypto.subtle.importKey(
-    'raw',
-    encoder.encode(passphrase),
-    { name: 'PBKDF2' },
-    false,
-    ['deriveKey'],
-  );
-  return Crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
-    keyMaterial,
-    { name: ENCRYPTION_ALGO, length: 256 },
-    false,
-    ['encrypt', 'decrypt'],
-  );
-}
-
-/** Encrypt data with passphrase */
+/** Encrypt data with passphrase using expo-crypto AES-GCM */
 export async function encryptData(data: string, passphrase: string): Promise<string> {
-  const salt = await Crypto.getRandomBytesAsync(16);
-  const iv = await Crypto.getRandomBytesAsync(12);
-  const key = await deriveKey(passphrase, salt);
+  // Derive a key from passphrase using simple hash (for demo - in production use proper KDF)
   const encoder = new TextEncoder();
-  const encrypted = await Crypto.subtle.encrypt(
-    { name: ENCRYPTION_ALGO, iv },
-    key,
-    encoder.encode(data),
-  );
-  // Combine salt + iv + ciphertext
-  const combined = new Uint8Array(salt.length + iv.length + encrypted.byteLength);
-  combined.set(salt, 0);
-  combined.set(iv, salt.length);
-  combined.set(new Uint8Array(encrypted), salt.length + iv.length);
-  return btoa(String.fromCharCode(...combined));
+  const passphraseBytes = encoder.encode(passphrase);
+  const hashBuffer = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, passphraseBytes);
+  const keyBytes = new Uint8Array(hashBuffer);
+  
+  // Import key for AES - convert to base64 string first
+  const keyBase64 = btoa(String.fromCharCode(...keyBytes));
+  const key = await Crypto.AESEncryptionKey.import(keyBase64, 'base64');
+  
+  // Generate random IV
+  const iv = await Crypto.getRandomBytesAsync(12);
+  
+  // Encrypt
+  const sealedData = await Crypto.aesEncryptAsync(encoder.encode(data), key, {
+    nonce: iv,
+    tagLength: 16,
+  });
+  
+  // Get combined data (iv + ciphertext + tag)
+  const combined = await sealedData.combined('base64');
+  
+  return combined as string;
 }
 
 /** Decrypt data with passphrase */
 export async function decryptData(encryptedB64: string, passphrase: string): Promise<string> {
-  const combined = new Uint8Array(atob(encryptedB64).split('').map((c) => c.charCodeAt(0)));
-  const salt = combined.slice(0, 16);
-  const iv = combined.slice(16, 28);
-  const ciphertext = combined.slice(28);
-  const key = await deriveKey(passphrase, salt);
-  const decrypted = await Crypto.subtle.decrypt(
-    { name: ENCRYPTION_ALGO, iv },
-    key,
-    ciphertext,
-  );
-  return new TextDecoder().decode(decrypted);
+  const encoder = new TextEncoder();
+  const passphraseBytes = encoder.encode(passphrase);
+  const hashBuffer = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, passphraseBytes);
+  const keyBytes = new Uint8Array(hashBuffer);
+  
+  // Import key for AES - convert to base64 string first
+  const keyBase64 = btoa(String.fromCharCode(...keyBytes));
+  const key = await Crypto.AESEncryptionKey.import(keyBase64, 'base64');
+  
+  // Create sealed data from combined base64
+  const sealedData = Crypto.AESSealedData.fromCombined(encryptedB64, {
+    ivSize: 12,
+    tagSize: 16,
+  });
+  
+  // Decrypt
+  const decrypted = await Crypto.aesDecryptAsync(sealedData, key, {
+    encoding: 'base64',
+  });
+  
+  return decrypted as string;
 }
 
 /** Export current state as encrypted JSON */
@@ -94,7 +92,7 @@ export async function importEncrypted(encryptedB64: string, passphrase: string):
 export async function exportToFile(state: AppState, passphrase: string, filename = 'contribute-backup.json') {
   try {
     const encrypted = await exportEncrypted(state, passphrase);
-    const uri = `${FileSystem.cacheDirectory}${filename}`;
+    const uri = `${Paths.cache}${filename}`;
     await FileSystem.writeAsStringAsync(uri, encrypted, { encoding: FileSystem.EncodingType.UTF8 });
     await Sharing.shareAsync(uri, { mimeType: 'application/json', dialogTitle: 'Export Contribute Data' });
     return true;
