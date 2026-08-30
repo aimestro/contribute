@@ -1,7 +1,7 @@
 import { encode as btoa } from 'base-64';
 import * as Crypto from 'expo-crypto';
 import * as DocumentPicker from 'expo-document-picker';
-import { FileSystem, Paths } from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Alert } from 'react-native';
 import { uid } from './format';
@@ -32,7 +32,7 @@ export async function encryptData(data: string, passphrase: string): Promise<str
   
   // Encrypt
   const sealedData = await Crypto.aesEncryptAsync(encoder.encode(data), key, {
-    nonce: iv,
+    nonce: { bytes: iv },
     tagLength: 16,
   });
   
@@ -55,13 +55,13 @@ export async function decryptData(encryptedB64: string, passphrase: string): Pro
   
   // Create sealed data from combined base64
   const sealedData = Crypto.AESSealedData.fromCombined(encryptedB64, {
-    ivSize: 12,
-    tagSize: 16,
+    ivLength: 12,
+    tagLength: 16,
   });
   
   // Decrypt
   const decrypted = await Crypto.aesDecryptAsync(sealedData, key, {
-    encoding: 'base64',
+    output: 'base64',
   });
   
   return decrypted as string;
@@ -92,9 +92,9 @@ export async function importEncrypted(encryptedB64: string, passphrase: string):
 export async function exportToFile(state: AppState, passphrase: string, filename = 'contribute-backup.json') {
   try {
     const encrypted = await exportEncrypted(state, passphrase);
-    const uri = `${Paths.cache}${filename}`;
-    await FileSystem.writeAsStringAsync(uri, encrypted, { encoding: FileSystem.EncodingType.UTF8 });
-    await Sharing.shareAsync(uri, { mimeType: 'application/json', dialogTitle: 'Export Contribute Data' });
+    const file = new File(Paths.cache, filename);
+    await file.write(encrypted, { encoding: 'utf8' });
+    await Sharing.shareAsync(file.uri, { mimeType: 'application/json', dialogTitle: 'Export Contribute Data' });
     return true;
   } catch (error) {
     console.error('Export failed:', error);
@@ -112,7 +112,8 @@ export async function importFromFile(passphrase: string): Promise<AppState | nul
     });
     if (result.canceled || !result.assets[0]) return null;
     const uri = result.assets[0].uri;
-    const encrypted = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.UTF8 });
+    const file = new File(uri);
+    const encrypted = await file.text();
     const state = await importEncrypted(encrypted, passphrase);
     return state;
   } catch (error) {
